@@ -20,26 +20,26 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
 
-usage() {
-    cat <<EOF
-Usage: $0 [options]
+type=""
 
--h : display this help and exit
--v : output version information and exit
-EOF
+usage() {
+    echo "$0 usage:" && grep "[[:space:]])\ #" $0 | sed 's/#//' | sed -r 's/\) /-/';
 }
 
 version() {
     sed -n "/sed/d;s/## //gp" $0
 }
 
-while getopts ":hv" opt; do
+while getopts ":hvt:" opt; do
   case ${opt} in
-    v )
+    t ) # type of configuration
+        type=${OPTARG}
+        ;;
+    v ) # output version information and exit
         version
         exit 0
         ;;
-    h | * )
+    h ) # display this help and exit
         usage
         ;;
    esac
