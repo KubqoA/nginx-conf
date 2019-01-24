@@ -20,7 +20,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
 
-type=""
+TEMPLATE_PATH=$(pwd)/templates
 
 usage() {
     echo "$0 usage:" && grep "[[:space:]])\ #" $0 | sed 's/#//' | sed -r 's/\) /-/';
@@ -30,9 +30,11 @@ version() {
     sed -n "/sed/d;s/## //gp" $0
 }
 
+type=default
+
 while getopts ":hvt:" opt; do
   case ${opt} in
-    t ) # type of configuration
+    t ) # type of virtual host
         type=${OPTARG}
         ;;
     v ) # output version information and exit
@@ -44,5 +46,14 @@ while getopts ":hvt:" opt; do
         ;;
    esac
 done
+
+template=${TEMPLATE_PATH}/${type}.conf
+
+if [[ ! -e $template ]]; then
+    echo "Invalid type specified"
+    exit 1
+fi
+
+
 
 exit 1
