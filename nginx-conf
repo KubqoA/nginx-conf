@@ -169,7 +169,7 @@ fi
 
 echo "Creating virutal host configuration..."
 cp $template /etc/nginx/sites-available/$domain.conf
-sed -i "s#example.com#$domain#g;s#publicdir#$publicdir#g;s#logsdir#$logsdir#g;s#ssldir#$ssldir#g"
+sed -i "s#example.com#$domain#g;s#publicdir#$publicdir#g;s#logsdir#$logsdir#g;s#ssldir#$ssldir#g" /etc/nginx/sites-available/$domain.conf
 ln -s /etc/nginx/sites-available/$domain.conf /etc/nginx/sites-enabled/
 nginx -t
 
