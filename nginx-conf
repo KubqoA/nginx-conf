@@ -1,7 +1,7 @@
 #!/bin/sh
 #
-# Nginx configuration manager
-#
+## Nginx configuration manager
+##
 ## Version: 2019-01-23
 ## Copyright (C) 2019 Jakub Arbet <jakub.arbet@protonmail.com>
 #
@@ -20,40 +20,67 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
 
-TEMPLATE_PATH=$(pwd)/templates
+TEMPLATE_PATH=$(dirname "$0")/templates
+
+types() {
+    echo "Available types: "
+    ls -w 1 $TEMPLATE_PATH | sed "s/.conf//g;s/^/- /g"
+}
 
 usage() {
-    echo "$0 usage:" && grep "[[:space:]])\ #" $0 | sed 's/#//' | sed -r 's/\) /-/';
+    echo "Usage: $0 [-hvb] [-t type] [-g giturl] <name>" && grep "[[:space:]])\ #" $0 | sed 's/#//' | sed -r 's/\) /-/';
+    exit 1
 }
 
 version() {
     sed -n "/sed/d;s/## //gp" $0
 }
 
+name=
 type=default
+bootstrap=false
+git=false
 
-while getopts ":hvt:" opt; do
+while getopts ":hvbt:g:" opt; do
   case ${opt} in
-    t ) # type of virtual host
-        type=${OPTARG}
-        ;;
-    v ) # output version information and exit
-        version
-        exit 0
-        ;;
-    h ) # display this help and exit
-        usage
-        ;;
+  t ) # type of virtual host
+      type=${OPTARG}
+      ;;
+  b ) # create a new bootstrap of the selected type
+      bootstrap=true
+      ;;
+  g ) # clone provided git repository for the new webhost
+      git=${OPTARG}
+      ;;
+  v ) # output version information and exit
+      version
+      exit 0
+      ;;
+  h ) # display this help and exit
+      usage
+      ;;
+  ? )
+      echo "Invalid option: $OPTARG" 1>&2
+      ;;
+  : )
+      echo "Invalid option: $OPTARG requires an argument" 1>&2
+      ;;
    esac
 done
+shift $(($OPTIND - 1))
+
+if [[ -z "$1" ]]; then
+    echo "No name specified"
+    exit 1
+fi
+name=$1
 
 template=${TEMPLATE_PATH}/${type}.conf
 
 if [[ ! -e $template ]]; then
     echo "Invalid type specified"
+    types
     exit 1
 fi
-
-
 
 exit 1
