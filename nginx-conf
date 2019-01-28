@@ -124,14 +124,14 @@ if [[ ! -e $template ]]; then
     exit 1
 fi
 
+if [[ -z "$dir" ]]; then
+    dir="$DEFAULT_VIRTUAL_HOSTS_PATH/$domain"
+fi
+
 publicdir=$dir/public
 logsdir=$dir/logs
 
 if [[ $skip_dir = false ]]; then
-    if [[ -z "$dir" ]]; then
-        dir="$DEFAUlT_VIRTUAL_HOSTS_PATH/$domain"
-    fi
-    
     if [[ -d $dir ]]; then
         echo "Directory $dir already exists and is not empty, specify another directory using the -d flag or remove the existing one."
         exit 1
@@ -169,7 +169,7 @@ fi
 
 echo "Creating virutal host configuration..."
 cp $template /etc/nginx/sites-available/$domain.conf
-sed -i "s/example.com/$domain/g;s/publicdir/$publicdir/g;s/logsdir/$logsdir/g;s/ssldir/$ssldir/g"
+sed -i "s#example.com#$domain#g;s#publicdir#$publicdir#g;s#logsdir#$logsdir#g;s#ssldir#$ssldir#g"
 ln -s /etc/nginx/sites-available/$domain.conf /etc/nginx/sites-enabled/
 nginx -t
 
