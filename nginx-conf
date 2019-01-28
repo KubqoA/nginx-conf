@@ -20,7 +20,16 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
 
+set -e
+
+if [ "$(id -u)" != "0" ]; then
+   echo "This script must be run as root" 1>&2
+   exit 1
+fi
+
 TEMPLATE_PATH=$(dirname "$0")/templates
+DEFAULT_VIRTUAL_HOSTS_PATH=/srv/www
+DEFAULT_OWNER="www:www"
 
 types() {
     echo "Available types: "
@@ -28,7 +37,7 @@ types() {
 }
 
 usage() {
-    echo "Usage: $0 [-hvb] [-t type] [-g giturl] <name>" && grep "[[:space:]])\ #" $0 | sed 's/#//' | sed -r 's/\) /-/';
+    echo "Usage: $0 [-hvb] [-d directory] [-g giturl] [-o \"user:group\"] [-t type] <domain>" && grep "[[:space:]])\ #" $0 | sed 's/#//' | sed -r 's/\) /-/';
     exit 1
 }
 
@@ -36,21 +45,28 @@ version() {
     sed -n "/sed/d;s/## //gp" $0
 }
 
-name=
 type=default
-bootstrap=false
-git=false
+bootstrap=
+git=
+dir=
+owner=
 
-while getopts ":hvbt:g:" opt; do
+while getopts ":hvbt:g:r:d:o:" opt; do
   case ${opt} in
-  t ) # type of virtual host
-      type=${OPTARG}
-      ;;
   b ) # create a new bootstrap of the selected type
       bootstrap=true
       ;;
+  d ) # specify the directory for the virtual host (defaults to /srv/www/DOMAIN)
+      dir=${OPTARG}
+      ;;
   g ) # clone provided git repository for the new webhost
       git=${OPTARG}
+      ;;
+  o ) # set the user and group owner of the virtual host directory (defaults to www:www)
+      owner=${OPTARG}
+      ;;
+  t ) # type of virtual host
+      type=${OPTARG}
       ;;
   v ) # output version information and exit
       version
@@ -70,10 +86,11 @@ done
 shift $(($OPTIND - 1))
 
 if [[ -z "$1" ]]; then
-    echo "No name specified"
+    echo "No domain specified"
     exit 1
 fi
-name=$1
+
+domain=$1
 
 template=${TEMPLATE_PATH}/${type}.conf
 
@@ -82,5 +99,41 @@ if [[ ! -e $template ]]; then
     types
     exit 1
 fi
+
+if [[ -z "$dir" ]]; then
+    dir="$DEFAUlT_VIRTUAL_HOSTS_PATH/$domain"
+fi
+
+if [[ -d $dir ]]; then
+    echo "Directory $dir already exists and is not empty, specify another directory using the -d flag or remove the existing one."
+    exit 1
+fi
+
+echo "Creating virtual host directory..."
+mkdir -p $dir
+
+if [[ -n $git ]]; then
+    clonedir=$dir/public
+    if [[ $type == "laravel" ]]; then
+        clonedir=$dir
+    fi
+    echo "Cloing specified git repository into $clonedir..."
+    git clone $git $clonedir
+#elif [[ -n $bootstrap ]]; then
+#    echo "Bootstraping option not yet implemented."
+else
+    mkdir $dir/logs
+    mkdir $dir/public
+    echo "<!doctype html><html><head><meta charset=\"utf-8\"><title>$domain</title></head><body><h1>$domain</h1></body></html>" > $dir/public/index.html
+fi
+
+if [[ -z $owner ]]; then
+    owner=$DEFAULT_OWNER
+fi
+chown -R $owner $dir
+find $dir -type d -exec chmod 775 {} \;
+find $dir -type f -exec chmod 644 {} \;
+
+echo "Done!"
 
 exit 1
