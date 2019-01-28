@@ -34,16 +34,16 @@ DEFAULT_OWNER="www:www"
 
 types() {
     echo "Available types: "
-    ls -w 1 $TEMPLATE_PATH | sed "s/.conf//g;s/^/- /g"
+    find "$TEMPLATE_PATH" -maxdepth 1 -name '*.conf' | sed "s/.conf//g;s/^.*\//- /g"
 }
 
 usage() {
-    echo "Usage: $0 [-hvbs] [-d directory] [-g giturl] [-o \"user:group\"] [-t type] <-c ssldomain> <domain>" && grep "[[:space:]])\ #" $0 | sed 's/#//' | sed -r 's/\) /-/';
+    echo "Usage: $0 [-hvbs] [-d directory] [-g giturl] [-o \"user:group\"] [-t type] <-c ssldomain> <domain>" && grep "[[:space:]])\ #" "$0" | sed 's/#//' | sed -r 's/\) /-/';
     exit 1
 }
 
 version() {
-    sed -n "/sed/d;s/## //gp" $0
+    sed -n "/sed/d;s/## //gp" "$0"
 }
 
 type=default
@@ -84,93 +84,93 @@ while getopts ":hvbst:g:r:d:o:c:" opt; do
   h ) # display this help and exit
       usage
       ;;
-  ? )
-      echo "Invalid option: $OPTARG" 1>&2
-      ;;
   : )
       echo "Invalid option: $OPTARG requires an argument" 1>&2
       ;;
+  ? )
+      echo "Invalid option: $OPTARG" 1>&2
+      ;;
    esac
 done
-shift $(($OPTIND - 1))
+shift $((OPTIND - 1))
 
-if [[ -z "$1" ]]; then
+if [ -z "$1" ]; then
     echo "No domain specified"
     exit 1
 fi
 
 domain=$1
 
-if [[ -e /etc/nginx/sites-available/$domain.conf ]]; then
+if [ -e /etc/nginx/sites-available/"$domain".conf ]; then
     echo "Configuration for this domain already exists, remove it and then try again."
     exit 1
 fi
 
 ssldir=$DEFAULT_SSL_PATH/$ssldomain
 
-if [[ -z $ssldomain ]]; then
+if [ -z "$ssldomain" ]; then
     echo "-c option is required"
     exit 1
-elif [[ ! -d $ssldir ]]; then
+elif [ ! -d "$ssldir" ]; then
     echo "Directory with SSL certificates $ssldir does not exist."
-    exit 1
+#    exit 1
 fi
 
 template=${TEMPLATE_PATH}/${type}.conf
 
-if [[ ! -e $template ]]; then
+if [ ! -e "$template" ]; then
     echo "Invalid type specified"
     types
     exit 1
 fi
 
-if [[ -z "$dir" ]]; then
+if [ -z "$dir" ]; then
     dir="$DEFAULT_VIRTUAL_HOSTS_PATH/$domain"
 fi
 
 publicdir=$dir/public
 logsdir=$dir/logs
 
-if [[ $skip_dir = false ]]; then
-    if [[ -d $dir ]]; then
+if [ $skip_dir = false ]; then
+    if [ -d "$dir" ]; then
         echo "Directory $dir already exists and is not empty, specify another directory using the -d flag or remove the existing one."
         exit 1
     fi
     
     echo "Creating virtual host directory..."
-    mkdir -p $dir
+    mkdir -p "$dir"
     
-    if [[ -n $git ]]; then
+    if [ -n "$git" ]; then
         clonedir=$dir/public
-        if [[ $type == "laravel" ]]; then
+        if [ "$type" = "laravel" ]; then
             clonedir=$dir
             logsdir=$dir/storage/logs
         fi
-        git clone $git $clonedir
-        mkdir -p $logsdir
+        git clone "$git" "$clonedir"
+        mkdir -p "$logsdir"
     else
-        mkdir $dir/logs
-        mkdir $dir/public
-        echo "<!doctype html><html><head><meta charset=\"utf-8\"><title>$domain</title></head><body><h1>$domain</h1></body></html>" > $dir/public/index.html
+        mkdir "$dir"/logs
+        mkdir "$dir"/public
+        echo "<!doctype html><html><head><meta charset=\"utf-8\"><title>$domain</title></head><body><h1>$domain</h1></body></html>" > "$dir"/public/index.html
     fi
     
-    if [[ -z $owner ]]; then
+    if [ -z "$owner" ]; then
         owner=$DEFAULT_OWNER
     fi
-    chown -R $owner $dir
-    find $dir -type d -exec chmod 775 {} \;
-    find $dir -type f -exec chmod 644 {} \;
+    chown -R $owner "$dir"
+    find "$dir" -type d -exec chmod 775 {} \;
+    find "$dir" -type f -exec chmod 644 {} \;
     
     echo "Done!"
-elif [[ -d $dir ]]; then
+elif [ -d "$dir" ]; then
     echo "Directory $dir does not exist, create it manually, or omit the -s flag."
     exit 1
 fi
 
 echo "Creating virutal host configuration..."
-cp $template /etc/nginx/sites-available/$domain.conf
-sed -i "s#example.com#$domain#g;s#publicdir#$publicdir#g;s#logsdir#$logsdir#g;s#ssldir#$ssldir#g" /etc/nginx/sites-available/$domain.conf
-ln -s /etc/nginx/sites-available/$domain.conf /etc/nginx/sites-enabled/
+cp "$template" /etc/nginx/sites-available/"$domain".conf
+sed -i "s#example.com#$domain#g;s#publicdir#$publicdir#g;s#logsdir#$logsdir#g;s#ssldir#$ssldir#g" /etc/nginx/sites-available/"$domain".conf
+ln -s /etc/nginx/sites-available/"$domain".conf /etc/nginx/sites-enabled/
 nginx -t
 
 service nginx reload
