@@ -28,6 +28,7 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 TEMPLATE_PATH=$(dirname "$0")/templates
+DEFAULT_SSL_PATH=/etc/nginx/ssl
 DEFAULT_VIRTUAL_HOSTS_PATH=/srv/www
 DEFAULT_OWNER="www:www"
 
@@ -37,7 +38,7 @@ types() {
 }
 
 usage() {
-    echo "Usage: $0 [-hvb] [-d directory] [-g giturl] [-o \"user:group\"] [-t type] <domain>" && grep "[[:space:]])\ #" $0 | sed 's/#//' | sed -r 's/\) /-/';
+    echo "Usage: $0 [-hvbs] [-d directory] [-g giturl] [-o \"user:group\"] [-t type] <-c ssldomain> <domain>" && grep "[[:space:]])\ #" $0 | sed 's/#//' | sed -r 's/\) /-/';
     exit 1
 }
 
@@ -46,15 +47,20 @@ version() {
 }
 
 type=default
+skip_dir=false
+ssldomain=
 bootstrap=
 git=
 dir=
 owner=
 
-while getopts ":hvbt:g:r:d:o:" opt; do
+while getopts ":hvbst:g:r:d:o:c:" opt; do
   case ${opt} in
   b ) # create a new bootstrap of the selected type
       bootstrap=true
+      ;;
+  c ) # specify the SSL certificate domain which should be used
+      ssldomain=${OPTARG}
       ;;
   d ) # specify the directory for the virtual host (defaults to /srv/www/DOMAIN)
       dir=${OPTARG}
@@ -64,6 +70,9 @@ while getopts ":hvbt:g:r:d:o:" opt; do
       ;;
   o ) # set the user and group owner of the virtual host directory (defaults to www:www)
       owner=${OPTARG}
+      ;;
+  s ) # skip directory creation
+      skip_dir=true
       ;;
   t ) # type of virtual host
       type=${OPTARG}
@@ -92,6 +101,21 @@ fi
 
 domain=$1
 
+if [[ -e /etc/nginx/sites-available/$domain.conf ]]; then
+    echo "Configuration for this domain already exists, remove it and then try again."
+    exit 1
+fi
+
+ssldir=$DEFAULT_SSL_PATH/$ssldomain
+
+if [[ -z $ssldomain ]]; then
+    echo "-c option is required"
+    exit 1
+elif [[ ! -d $ssldir ]]; then
+    echo "Directory with SSL certificates $ssldir does not exist."
+    exit 1
+fi
+
 template=${TEMPLATE_PATH}/${type}.conf
 
 if [[ ! -e $template ]]; then
@@ -100,40 +124,55 @@ if [[ ! -e $template ]]; then
     exit 1
 fi
 
-if [[ -z "$dir" ]]; then
-    dir="$DEFAUlT_VIRTUAL_HOSTS_PATH/$domain"
-fi
+publicdir=$dir/public
+logsdir=$dir/logs
 
-if [[ -d $dir ]]; then
-    echo "Directory $dir already exists and is not empty, specify another directory using the -d flag or remove the existing one."
+if [[ $skip_dir = false ]]; then
+    if [[ -z "$dir" ]]; then
+        dir="$DEFAUlT_VIRTUAL_HOSTS_PATH/$domain"
+    fi
+    
+    if [[ -d $dir ]]; then
+        echo "Directory $dir already exists and is not empty, specify another directory using the -d flag or remove the existing one."
+        exit 1
+    fi
+    
+    echo "Creating virtual host directory..."
+    mkdir -p $dir
+    
+    if [[ -n $git ]]; then
+        clonedir=$dir/public
+        if [[ $type == "laravel" ]]; then
+            clonedir=$dir
+            logsdir=$dir/storage/logs
+        fi
+        git clone $git $clonedir
+        mkdir -p $logsdir
+    else
+        mkdir $dir/logs
+        mkdir $dir/public
+        echo "<!doctype html><html><head><meta charset=\"utf-8\"><title>$domain</title></head><body><h1>$domain</h1></body></html>" > $dir/public/index.html
+    fi
+    
+    if [[ -z $owner ]]; then
+        owner=$DEFAULT_OWNER
+    fi
+    chown -R $owner $dir
+    find $dir -type d -exec chmod 775 {} \;
+    find $dir -type f -exec chmod 644 {} \;
+    
+    echo "Done!"
+elif [[ -d $dir ]]; then
+    echo "Directory $dir does not exist, create it manually, or omit the -s flag."
     exit 1
 fi
 
-echo "Creating virtual host directory..."
-mkdir -p $dir
+echo "Creating virutal host configuration..."
+cp $template /etc/nginx/sites-available/$domain.conf
+sed -i "s/example.com/$domain/g;s/publicdir/$publicdir/g;s/logsdir/$logsdir/g;s/ssldir/$ssldir/g"
+ln -s /etc/nginx/sites-available/$domain.conf /etc/nginx/sites-enabled/
+nginx -t
 
-if [[ -n $git ]]; then
-    clonedir=$dir/public
-    if [[ $type == "laravel" ]]; then
-        clonedir=$dir
-    fi
-    echo "Cloing specified git repository into $clonedir..."
-    git clone $git $clonedir
-#elif [[ -n $bootstrap ]]; then
-#    echo "Bootstraping option not yet implemented."
-else
-    mkdir $dir/logs
-    mkdir $dir/public
-    echo "<!doctype html><html><head><meta charset=\"utf-8\"><title>$domain</title></head><body><h1>$domain</h1></body></html>" > $dir/public/index.html
-fi
-
-if [[ -z $owner ]]; then
-    owner=$DEFAULT_OWNER
-fi
-chown -R $owner $dir
-find $dir -type d -exec chmod 775 {} \;
-find $dir -type f -exec chmod 644 {} \;
-
-echo "Done!"
+service nginx reload
 
 exit 1
