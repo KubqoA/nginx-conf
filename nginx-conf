@@ -2,7 +2,7 @@
 #
 ## Nginx configuration manager
 ##
-## Version: 2019-01-28
+## Version: 2019-07-26
 ## Copyright (C) 2019 Jakub Arbet <jakub.arbet@protonmail.com>
 #
 # This program is free software; you can redistribute it and/or
@@ -28,95 +28,163 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 TEMPLATE_PATH=$(dirname "$0")/templates
-DEFAULT_SSL_PATH=/etc/nginx/ssl
+DEFAULT_NGINX_PATH=/etc/nginx
+DEFAULT_SSL_PATH=$DEFAULT_NGINX_PATH/ssl
 DEFAULT_VIRTUAL_HOSTS_PATH=/srv/www
-DEFAULT_OWNER="www:www"
+DEFAULT_OWNER_USER="www-data"
+DEFAULT_OWNER_GROUP="www-data"
+
+die() {
+    printf '%s\n' "$1" >&2
+    exit 1
+}
+
+verbose() {
+    if $verbose; then printf '[DEBUG] %s\n' "$1" >&2; fi
+}
 
 types() {
     echo "Available types: "
     find "$TEMPLATE_PATH" -maxdepth 1 -name '*.conf' | sed "s/.conf//g;s/^.*\//- /g"
 }
 
-usage() {
-    echo "Usage: $0 [-hvbs] [-d directory] [-g giturl] [-o \"user:group\"] [-t type] <-c ssldomain> <domain>" && grep "[[:space:]])\ #" "$0" | sed 's/#//' | sed -r 's/\) /-/';
-    exit 1
-}
-
 version() {
     sed -n "/sed/d;s/## //gp" "$0"
+    exit 0
 }
 
-type=default
-skip_dir=false
-ssldomain=
-bootstrap=
-git=
-dir=
-owner=
+usage() {
+    die "Nginx configuration manager
 
-while getopts ":hvbst:g:r:d:o:c:" opt; do
-  case ${opt} in
-  b ) # create a new bootstrap of the selected type
-      bootstrap=true
-      ;;
-  c ) # specify the SSL certificate domain which should be used
-      ssldomain=${OPTARG}
-      ;;
-  d ) # specify the directory for the virtual host (defaults to /srv/www/DOMAIN)
-      dir=${OPTARG}
-      ;;
-  g ) # clone provided git repository for the new webhost
-      git=${OPTARG}
-      ;;
-  o ) # set the user and group owner of the virtual host directory (defaults to www:www)
-      owner=${OPTARG}
-      ;;
-  s ) # skip directory creation
-      skip_dir=true
-      ;;
-  t ) # type of virtual host
-      type=${OPTARG}
-      ;;
-  v ) # output version information and exit
-      version
-      exit 0
-      ;;
-  h ) # display this help and exit
-      usage
-      ;;
-  : )
-      echo "Invalid option: $OPTARG requires an argument" 1>&2
-      ;;
-  ? )
-      echo "Invalid option: $OPTARG" 1>&2
-      ;;
-   esac
+USAGE:
+  $0 [OPTIONS] <domain>
+
+OPTIONS:
+  -h,--help                     Print this help information
+  -V,--version                  Print version info and exit
+  -v,--verbose                  Use verbose output
+  -c,--certdomain <certdomain>  SSL certificate domain to be used (defaults to <domain>)
+  -d,--directory <directory>    Directory for the virtual host (defaults to /srv/www/<domain>
+  --skip-directory-creation     Skip directory creation
+  -g,--git <repository>         Git repository to clone to the virtual host directory, ignored when -s is used
+  -o,--owner <owner>            User and group owner of the virtual host directory (defaults to $DEFAULT_OWNER_USER:$DEFAULT_OWNER_GROUP)
+  -t,--type <type>              Type of the virtual host configuration to be used
+  -s,--create-sftp-user         Create a new user for SFTP access for the virtual host"
+}
+
+# Initialize all the option variables.
+certdomain=
+directory=
+skip_directory_creation=false
+git_repository=
+owner=
+type=default
+verbose=false
+create_sftp_user=
+
+while :; do
+    case $1 in
+        -c|--certdomain)
+            if [ "$2" ]; then
+                certdomain=$2
+                shift
+            else
+                die "ERROR: \"$1\" requires a non-empty option argument."
+            fi
+            ;;
+        -d|--directory)
+            if [ "$2" ]; then
+                directory=$2
+                shift
+            else
+                die "ERROR: \"$1\" requires a non-empty option argument."
+            fi
+            ;;
+        --skip-directory-creation)
+            skip_directory_creation=true
+            ;;
+        -g|--git)
+            if [ "$2" ]; then
+                git_repository=$2
+                shift
+            else
+                die "ERROR: \"$1\" requires a non-empty option argument."
+            fi
+            ;;
+        -o|--owner)
+            if [ "$2" ]; then
+                owner=$2
+                shift
+            else
+                die "ERROR: \"$1\" requires a non-empty option argument."
+            fi
+            ;;
+        -t|--type)
+            if [ "$2" ]; then
+                type=$2
+                shift
+            else
+                printf 'The "%s" option requires you to specify the type\n' "$1" >&2
+                types
+                exit 1
+            fi
+            ;;
+        -s|--create-sftp-user)
+            create_sftp_user=true
+            ;;
+        -v|--verbose)
+            verbose=true
+            ;;
+        -V|--version)
+            version
+            ;;
+        -h|--help)
+            usage
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -?*)
+            printf 'WARN: Unknown option (ignored): %s\n' "$1" >&2
+            ;;
+        *)
+            break
+    esac
+
+    shift
 done
-shift $((OPTIND - 1))
 
 if [ -z "$1" ]; then
-    echo "No domain specified"
-    exit 1
+    die "No domain specified"
 fi
 
 domain=$1
 
-if [ -e /etc/nginx/sites-available/"$domain".conf ]; then
-    echo "Configuration for this domain already exists, remove it and then try again."
-    exit 1
+verbose "Checking for already existing virtual host configuration..."
+if [ -e "$DEFAULT_NGINX_PATH/sites-available/$domain.conf" ]; then
+    die "Configuration for this domain already exists, remove it and then try again."
+fi
+verbose "OK"
+
+if [ -z "$certdomain" ]; then
+    certdomain=$domain
+    verbose "No certificate domain specified, defaulting to $certdomain"
 fi
 
-ssldir=$DEFAULT_SSL_PATH/$ssldomain
+certdir=$DEFAULT_SSL_PATH/$certdomain
 
-if [ -z "$ssldomain" ]; then
-    echo "-c option is required"
-    exit 1
-elif [ ! -d "$ssldir" ]; then
-    echo "Directory with SSL certificates $ssldir does not exist."
-#    exit 1
+verbose "Checking for the existence of certificate directory $certdir..."
+
+if [ ! -d "$certdir" ]; then
+    die "Directory with SSL certificates $certdir does not exist."
 fi
+
+verbose "OK"
 
 template=${TEMPLATE_PATH}/${type}.conf
+
+verbose "Checking the validity of the specified type..."
 
 if [ ! -e "$template" ]; then
     echo "Invalid type specified"
@@ -124,55 +192,74 @@ if [ ! -e "$template" ]; then
     exit 1
 fi
 
-if [ -z "$dir" ]; then
-    dir="$DEFAULT_VIRTUAL_HOSTS_PATH/$domain"
+verbose "OK"
+
+if [ -z "$directory" ]; then
+    directory="$DEFAULT_VIRTUAL_HOSTS_PATH/$domain"
+    verbose "No directory specified defaulting to $directory"
 fi
 
-publicdir=$dir/public
-logsdir=$dir/logs
+publicdir=$directory/public
+logsdir=$directory/logs
 
-if [ $skip_dir = false ]; then
-    if [ -d "$dir" ]; then
-        echo "Directory $dir already exists and is not empty, specify another directory using the -d flag or remove the existing one."
-        exit 1
+if [ -z "$owner" ]; then
+    owner="$DEFAULT_OWNER_USER:$DEFAULT_OWNER_GROUP"
+    verbose "No owner specified defaulting to $owner"
+fi
+
+if [ $create_sftp_user = true ]; then
+    verbose "Creating new sftp user ($domain)..."
+    useradd -d "$directory" -s /bin/false -M "$domain"
+    owner="$domain:$DEFAULT_OWNER_GROUP"
+    verbose "Overriden owener to $owner"
+    verbose "OK"
+fi
+
+if [ $skip_directory_creation = false ]; then
+    verbose "Creating virtual host directory..."
+    if [ -d "$directory" ]; then
+        die "Directory $directory already exists and is not empty, specify another directory using the -d flag or remove the existing one."
     fi
     
-    echo "Creating virtual host directory..."
-    mkdir -p "$dir"
+    mkdir -p "$directory"
     
-    if [ -n "$git" ]; then
-        clonedir=$dir/public
+    if [ -n "$git_repository" ]; then
+        verbose "Cloning git repository $git_repository..."
+        clonedir="$directory/public"
         if [ "$type" = "laravel" ]; then
-            clonedir=$dir
-            logsdir=$dir/storage/logs
+            clonedir="$directory"
+            logsdir="$directory/storage/logs"
         fi
-        git clone "$git" "$clonedir"
+        git clone "$git_repository" "$clonedir"
+        verbose "OK"
+        verbose "Creating logs directory..."
         mkdir -p "$logsdir"
+        verbose "OK"
     else
-        mkdir "$dir"/logs
-        mkdir "$dir"/public
-        echo "<!doctype html><html><head><meta charset=\"utf-8\"><title>$domain</title></head><body><h1>$domain</h1></body></html>" > "$dir"/public/index.html
+        mkdir "$publicdir"
+        mkdir "$logsdir"
+        echo "<!doctype html><html><head><meta charset=\"utf-8\"><title>$domain</title></head><body><h1>$domain</h1></body></html>" > "$publicdir/index.html"
     fi
-    
-    if [ -z "$owner" ]; then
-        owner=$DEFAULT_OWNER
-    fi
-    chown -R $owner "$dir"
-    find "$dir" -type d -exec chmod 775 {} \;
-    find "$dir" -type f -exec chmod 644 {} \;
-    
-    echo "Done!"
-elif [ -d "$dir" ]; then
-    echo "Directory $dir does not exist, create it manually, or omit the -s flag."
-    exit 1
+    verbose "OK"
+    verbose "Setting the owner and permissions..."
+    chown root:root "$directory"
+    cmod 750 "$directory"
+    chown -R "$owner" "$directory/*"
+    find "$directory" -type d -exec chmod 775 {} \;
+    find "$directory" -type f -exec chmod 644 {} \;
+    chmod g+s "$publicdir"
+    verbose "OK"
+elif [ ! -d "$directory" ] || [ ! -d "$logsdir" ] || [ ! -d "$publicdir" ]; then
+    die "Directory $directory, or subdirectories logs and public do not exist, create them manually, or omit the --skip-directory-creation flag."
 fi
 
-echo "Creating virutal host configuration..."
-cp "$template" /etc/nginx/sites-available/"$domain".conf
-sed -i "s#example.com#$domain#g;s#publicdir#$publicdir#g;s#logsdir#$logsdir#g;s#ssldir#$ssldir#g" /etc/nginx/sites-available/"$domain".conf
-ln -s /etc/nginx/sites-available/"$domain".conf /etc/nginx/sites-enabled/
+verbose "Creating virutal host configuration..."
+cp "$template" "$DEFAULT_NGINX_PATH/sites-available/$domain.conf"
+sed -i "s#example.com#$domain#g;s#publicdir#$publicdir#g;s#logsdir#$logsdir#g;s#ssldir#$certdir#g;s#nginxdir#$DEFAULT_NGINX_PATH" "$DEFAULT_NGINX_PATH/sites-available/$domain.conf"
+ln -s "$DEFAULT_NGINX_PATH/sites-available/$domain.conf" "$DEFAULT_NGINX_PATH/sites-enabled/"
 nginx -t
+verbose "OK"
 
 service nginx reload
 
-exit 1
+exit 0

@@ -1,0 +1,11 @@
+#!/bin/sh
+
+dir=$1
+domain=$2
+
+if [[ -z $dir ]] || [[ -z $domain ]]; then
+    exit 1
+fi
+
+composer create-project roots/bedrock $dir
+
